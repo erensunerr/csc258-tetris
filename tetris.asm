@@ -450,6 +450,8 @@ game_loop:
         beq $t4, 0x61, pressed_key_is_a
         beq $t4, 0x73, pressed_key_is_s
         beq $t4, 0x64, pressed_key_is_d
+        beq $t4, 0x71, pressed_key_is_q
+        
         b game_loop_loop_no_keyboard_events
         
         pressed_key_is_a:
@@ -461,6 +463,8 @@ game_loop:
         pressed_key_is_d:
             addi $t0, $t0, 1
             b game_loop_loop_no_keyboard_events
+        pressed_key_is_q:
+            j exit
         
         game_loop_loop_no_keyboard_events:
             
