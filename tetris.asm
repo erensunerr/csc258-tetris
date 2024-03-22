@@ -65,6 +65,8 @@
 
 
 .data
+    KEYBOARD_ADDR:
+        .word 0xffff0000
     DISPLAY_ADDR:
         .word 0x10008000
     # These are in pixels
@@ -112,9 +114,18 @@
                 1000
     # GRID:
         # # size: GAME_AREA_W * GAME_AREA_H
-        
-    # TET_LOOKUP:
-        
+        # address: 2 bytes (first half: tetramino code f if empty, second half: should it be redrawn? 1 or 0)
+        # instead of this, I could put the tetramino code in the last byte
+        # of the display area
+    # CURRENT_TET:
+        # tet code
+        # x
+        # y
+        # rotation: 0, 1, 2, 3
+    # NEXT_TET:
+        # tet code
+        # x
+        # y
 # CODE
 
 
