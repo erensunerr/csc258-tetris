@@ -90,10 +90,31 @@
     # data + 12
     
     GRID_COLOR:
-        .word 0xff0000 #0x333230
+        .word 0x333230
     CHECKERBOARD_COLOR:
-        .word 0x00ff00 #0x242323
-
+        .word 0x242323
+    
+    # data + 20
+    TET_SIZE: .byte 8 # size for each individual tetramino
+    .align 3
+    
+    # data + 24
+    TET:
+        # for each tetramino, the least significant 16 bits (= 2 bytes) of the *first word*
+        # is the draw zones in a 4x4 grid from top left to bottom right
+        # the last 4 bytes is the color
+        # so each tetramino is 4 + 4 = 8 bytes
+        TET_0:
+            .word 0b0000011001100000 # least significant 16 bits
+            .word 0x0000ff
+        TET_1:
+            .word 0b100010001000
+                1000
+    # GRID:
+        # # size: GAME_AREA_W * GAME_AREA_H
+        
+    # TET_LOOKUP:
+        
 # CODE
 
 
@@ -309,10 +330,77 @@ draw_grid:
         blt $t1, $t3, draw_grid_loop_1
     jr $ra
 
+# 0: w x - from game area top left in units
+# 1: w y - "
+# 2: w tetramino code, from left to right, top to bottom
+# on this image: https://www.researchgate.net/publication/276133486/figure/fig1/AS:1086774763888648@1636118703157/The-standard-naming-convention-for-the-seven-Tetrominoes.jpg
+# starting from 0 top left
+draw_tet:
+    pop($t0)
+    pop($t1)
+    pop($t2)
+    
+    lb $t3, TET_SIZE
+    mult $t2, $t2, $t3
+    la $t3, TET
+    add $t2, $t2, $t3
+    
+    lw $t3, 0($t2) # load the tetramino draw zone from definition
+    lw $t4, 4($t2) # load tetramino color
+    
+    add $t5, $t0, 4 # x boundary
+    add $t6, $t1, 4 # y boundary
+    
+    move $t8, $t0 # x saved
+    
+    # draw while right shifting
+    # from the draw zone
+    draw_tet_loop_0:
+        move $t0, $t8
+        draw_tet_loop_0_0:
+            li $t7, 1 # mask for getting which box to draw from drawzone
+            and $t7, $t3, $t7 # 1 if drawing 0 otw
+            beq $t7, 0, draw_tet_loop_0_0_nodraw
+            
+            __caller_prep()
+            push($t4) # color
+            push($t1) # y
+            push($t0) # x
+            jal draw_box
+            __caller_restore()
+            
+            draw_tet_loop_0_0_nodraw:
+            addi $t0, $t0, 1
+            srl $t3, $t3, 1
+            bne $t0, $t5, draw_tet_loop_0_0
+        addi $t1, $t1, 1
+        bne $t1, $t6, draw_tet_loop_0
+    jr $ra
+
+
+# 0: x, 1: y, 2: color
+# x, y in units, from top left of the
+# game area being 0, 0
+draw_box_inside_grid:
+    jr $ra
+
+
 .entry main
 main:
     __caller_prep()
     jal draw_grid
+    __caller_restore()
+    
+    
+    li $t0, 3
+    li $t1, 3
+    li $t2, 0
+    
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal draw_tet
     __caller_restore()
     
 exit:
