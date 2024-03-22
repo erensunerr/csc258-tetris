@@ -27,9 +27,8 @@ keyboard_input:                     # A key is pressed
 
     li $v0, 1                       # ask system to print $a0
     syscall
-
+    
     b main
-
 respond_to_Q:
 	li $v0, 10                      # Quit gracefully
 	syscall

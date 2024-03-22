@@ -112,9 +112,11 @@
         TET_1:
             .word 0b100010001000
                 1000
+    LOG_GAME_LOOP:
+        .asciiz "Loop\n"
     # GRID:
         # # size: GAME_AREA_W * GAME_AREA_H
-        # address: 2 bytes (first half: tetramino code f if empty, second half: should it be redrawn? 1 or 0)
+        # address: 1 byte (tetramino lookup code)
         # instead of this, I could put the tetramino code in the last byte
         # of the display area
     # CURRENT_TET:
@@ -325,6 +327,7 @@ draw_grid:
         andi $t4, $t1, 1
         add $t0, $t0, $t4
         
+        lw $t9, CHECKERBOARD_COLOR
         draw_grid_loop_1_0:
             # go through x
             __caller_prep()
@@ -337,9 +340,30 @@ draw_grid:
             # add 2 to x each round
             addi $t0, $t0, 2
             blt $t0, $t2, draw_grid_loop_1_0
+        
+        lb $t0, GAME_AREA_TOP_LEFT_x
+        li $t9, 0
+        addi $t4, $t4, 1
+        andi $t4, $t4, 1
+        add $t0, $t0, $t4
+        
+        draw_grid_loop_1_1:
+            # go through x
+            __caller_prep()
+            push($t9) # color
+            push($t1) # y
+            push($t0) # x
+            jal draw_box
+            __caller_restore()
+            
+            # add 2 to x each round
+            addi $t0, $t0, 2
+            blt $t0, $t2, draw_grid_loop_1_1
+            
         addi $t1, $t1, 1
         blt $t1, $t3, draw_grid_loop_1
     jr $ra
+
 
 # 0: w x - from game area top left in units
 # 1: w y - "
@@ -392,26 +416,79 @@ draw_tet:
 # 0: x, 1: y, 2: color
 # x, y in units, from top left of the
 # game area being 0, 0
+# TODO: switch from drawing on the display
+# to an intermediate grid
 draw_box_inside_grid:
     jr $ra
 
 
+# 0: x
+# 1: y
+# 2: tet code
+# returns 1 for collisions, 0 for no collisions in $v0
+check_collisions:
+    
+
+
+# runs the game loop
+game_loop:
+    game_loop_setup:
+        li $t0, 3
+        li $t1, 3
+        li $t2, 0
+    game_loop_loop:
+        __caller_prep()
+        jal draw_grid
+        __caller_restore()
+        
+        # Check keyboard for actions!
+        lw $t3, KEYBOARD_ADDR
+        lw $t4, 0($t3)
+        bne $t4, 1, game_loop_loop_no_keyboard_events
+        lw $t4, 4($t3)
+        
+        beq $t4, 0x61, pressed_key_is_a
+        beq $t4, 0x73, pressed_key_is_s
+        beq $t4, 0x64, pressed_key_is_d
+        b game_loop_loop_no_keyboard_events
+        
+        pressed_key_is_a:
+            subi $t0, $t0, 1
+            b game_loop_loop_no_keyboard_events
+        pressed_key_is_s:
+            addi $t1, $t1, 1
+            b game_loop_loop_no_keyboard_events
+        pressed_key_is_d:
+            addi $t0, $t0, 1
+            b game_loop_loop_no_keyboard_events
+        
+        game_loop_loop_no_keyboard_events:
+            
+        
+        
+        __caller_prep()
+        push($t2)
+        push($t1)
+        push($t0)
+        jal draw_tet
+        __caller_restore()
+        
+        la $a0, LOG_GAME_LOOP
+        li $v0, 4
+        syscall
+        
+        # sleep for $a0 milliseconds
+        li $a0, 8
+        li $v0, 32
+        syscall
+        b game_loop_loop
+    game_loop_exit:
+        jr $ra
+
 .entry main
 main:
     __caller_prep()
-    jal draw_grid
-    __caller_restore()
-    
-    
-    li $t0, 3
-    li $t1, 3
-    li $t2, 0
-    
-    __caller_prep()
-    push($t2)
-    push($t1)
-    push($t0)
-    jal draw_tet
+    jal game_loop
     __caller_restore()
     
 exit:
