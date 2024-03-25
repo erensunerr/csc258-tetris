@@ -61,6 +61,17 @@
     pop($s0)
 .end_macro
 
+
+.macro get_IPA(%det, %load)
+    # if %det == 0, return the address of the normal IPA, next IPA otw
+    beq %det, 0, get_IPA_next
+    
+    la %load, INTERMEDIATE_PLAYING_AREA
+    j get_IPA_end
+    get_IPA_next:
+        la %load, NEXT_INTERMEDIATE_PLAYING_AREA
+    get_IPA_end:
+.end_macro
 # DATA
 
 
@@ -93,12 +104,6 @@
     
     GRID_COLOR:
         .word 0x333230
-    CHECKERBOARD_COLOR:
-        .word 0x242323
-    
-    # data + 20
-    TET_SIZE: .byte 8 # size for each individual tetramino
-    .align 3
     
     # data + 24
     TET:
@@ -107,27 +112,57 @@
         # the last 4 bytes is the color
         # so each tetramino is 4 + 4 = 8 bytes
         TET_0:
-            .word 0b0000011001100000 # least significant 16 bits
-            .word 0x0000ff
+            .word 0b1100110000000000 # least significant 16 bits
+            .word 2
         TET_1:
-            .word 0b100010001000
-                1000
-    LOG_GAME_LOOP:
-        .asciiz "Loop\n"
-    # GRID:
+            .word 0b1000100010001000
+            .word 3
+        TET_2:
+            .word 0b0110110000000000
+            .word 4
+        TET_3:
+            .word 0b1100011000000000
+            .word 5
+        TET_4:
+            .word 0b1000100011000000
+            .word 6
+        TET_5:
+            .word 0b0100010011000000
+            .word 7
+        TET_6:
+            .word 0b1110010000000000
+            .word 8
+        
+    INTERMEDIATE_PLAYING_AREA: # (22 + 4) * 12 = 312
         # # size: GAME_AREA_W * GAME_AREA_H
-        # address: 1 byte (tetramino lookup code)
-        # instead of this, I could put the tetramino code in the last byte
-        # of the display area
-    # CURRENT_TET:
-        # tet code
-        # x
-        # y
-        # rotation: 0, 1, 2, 3
-    # NEXT_TET:
-        # tet code
-        # x
-        # y
+        # address: 1 byte color lookup code
+        .space 312
+    
+    NEXT_INTERMEDIATE_PLAYING_AREA: # will be the intermediate playing area
+        # for the next turn, if it satisfies the representation invariants
+        .space 312
+    
+    COLOR_LOOKUP:
+        .word 0x000000 # checkerboard - 0
+        .word 0x242323 # checkerboard - 1
+        .word 0x0000ff # tet - 0
+        .word 0x00ff00
+        .word 0xff0000
+        .word 0x00ffff
+        .word 0xff00ff
+        .word 0xffff00
+        .word 0xffffff # tet - 6
+        
+    CURR_TET:
+        .word 0 # tet code
+        .word 0 # x
+        .word 0 # y
+        .word 0 # rotation 0
+        
+    NEXT_TET:
+        .word 0 # tet code
+        
+        
 # CODE
 
 
@@ -308,192 +343,372 @@ draw_grid:
         __caller_restore()
         addi $t1, $t1, 1
         blt $t1, $t4, draw_grid_loop_2
+    jr $ra
     
-    # draw the checkerboard inside the game area
-    lw $t9, CHECKERBOARD_COLOR
-    lb $t0, GAME_AREA_TOP_LEFT_x
-    lb $t1, GAME_AREA_TOP_LEFT_y
-    lb $t4, GAME_AREA_WIDTH
-    lb $t5, GAME_AREA_HEIGHT
+
+# no arguments
+# no returns
+initialize_intermediate_playing_area:
+    li $t1, 0 # y counter
+    lb $t2, GAME_AREA_WIDTH # x limit
+    lb $t3, GAME_AREA_HEIGHT # y limit
     
-    add $t2, $t0, $t4 # t2 is the x boundary = game_area_top_left_x + game_area_width
-    add $t3, $t1, $t5 # t3 is the y boundary = game_area_top_left_y + game_area_height
+    addi $t3, $t3, 4
     
-    draw_grid_loop_1:
-        # go through y
-        lb $t0, GAME_AREA_TOP_LEFT_x
-        
-        # add 1 if y index is odd
-        andi $t4, $t1, 1
-        add $t0, $t0, $t4
-        
-        lw $t9, CHECKERBOARD_COLOR
-        draw_grid_loop_1_0:
-            # go through x
+    li $t9, 0 # color code should alternate between 1 and 0
+    li $t8, 1 # used as flag for alternating colors
+    
+    la $t5, INTERMEDIATE_PLAYING_AREA
+    
+    initialize_intermediate_playing_area_0:
+        li $t0, 0 # x counter
+        move $t7, $t9
+        initialize_intermediate_playing_area_1:
             __caller_prep()
-            push($t9) # color
-            push($t1) # y
-            push($t0) # x
-            jal draw_box
+            push($t7)
+            push($t1)
+            push($t0)
+            jal write_intermediate_playing_area_box
             __caller_restore()
             
-            # add 2 to x each round
-            addi $t0, $t0, 2
-            blt $t0, $t2, draw_grid_loop_1_0
-        
-        lb $t0, GAME_AREA_TOP_LEFT_x
-        li $t9, 0
-        addi $t4, $t4, 1
-        andi $t4, $t4, 1
-        add $t0, $t0, $t4
-        
-        draw_grid_loop_1_1:
-            # go through x
-            __caller_prep()
-            push($t9) # color
-            push($t1) # y
-            push($t0) # x
-            jal draw_box
-            __caller_restore()
+            addi $t7, $t7, 1
+            and $t7, $t7, $t8
             
-            # add 2 to x each round
-            addi $t0, $t0, 2
-            blt $t0, $t2, draw_grid_loop_1_1
-            
+            addi $t0, $t0, 1
+            blt $t0, $t2, initialize_intermediate_playing_area_1
+    
+        addi $t9, $t9, 1
+        and $t9, $t9, $t8
+    
         addi $t1, $t1, 1
-        blt $t1, $t3, draw_grid_loop_1
+        blt $t1, $t3, initialize_intermediate_playing_area_0
+    jr $ra
+    
+# 0: x
+# 1: y
+# a0: which IPA to read from
+# returns: color lookup code in $v0
+read_intermediate_playing_area_box:
+    pop($t0) # x
+    pop($t1) # y
+    lb $t2, GAME_AREA_WIDTH
+    
+    multu $t1, $t1, $t2
+    add $t0, $t0, $t1
+    
+    get_IPA($a0, $t2)
+    
+    add $t0, $t0, $t2
+    
+    lb $t2, 0($t0) # t2 is the color lookup code
+    
+    move $v0, $t2
+    jr $ra
+     
+     
+# 0: color lookup code
+# returns: 0: color, in $v0
+lookup_color:
+    pop($t2)
+    la $t0, COLOR_LOOKUP
+    li $t1, 4
+    mult $t2, $t2, $t1
+    add $t0, $t0, $t2 # t0 is the color address
+    
+    lw $v0, 0($t0)
+    jr $ra
+ 
+ # 0: x
+ # 1: y
+ # 2: color lookup code
+ # a0: which intermediate playing area to write on
+ # returns nothing
+ write_intermediate_playing_area_box:
+    pop($t0) # x
+    pop($t1) # y
+    pop($t3) # color lookup code
+    
+    lb $t2, GAME_AREA_WIDTH
+    
+    multu $t1, $t1, $t2
+    add $t0, $t0, $t1
+    
+    get_IPA($a0, $t2)
+    
+    add $t0, $t0, $t2   # $t0 is the write address
+    
+    sb $t3, 0($t0) # t3 is the color lookup code
     jr $ra
 
 
-# 0: w x - from game area top left in units
-# 1: w y - "
-# 2: w tetramino code, from left to right, top to bottom
-# on this image: https://www.researchgate.net/publication/276133486/figure/fig1/AS:1086774763888648@1636118703157/The-standard-naming-convention-for-the-seven-Tetrominoes.jpg
-# starting from 0 top left
+# x : 0
+# y : 1
+# returns nothing
+write_intermediate_playing_area_box_to_display:
+    pop($t0) # x
+    pop($t1) # y
+    
+    __caller_prep()
+    li $a0, 0 # when writing to display, always read from the current IPA
+    push($t1)
+    push($t0)
+    jal read_intermediate_playing_area_box
+    __caller_restore()
+   
+   move $t3, $v0 # $t3 is the color lookup code
+   
+   __caller_prep()
+   push($t3)
+   jal lookup_color
+   __caller_restore()
+   move $t3, $v0 # $t3 is the color to write
+   
+   blt $t1, 4, return_write_intermediate_playing_area_box_to_display
+   
+   subi $t1, $t1, 4
+   # calculate the address, in display, to write
+   
+   lb $t2, GAME_AREA_TOP_LEFT_x
+   add $t0, $t0, $t2
+   
+   lb $t2, GAME_AREA_TOP_LEFT_y
+   add $t1, $t1, $t2
+   
+   __caller_prep()
+   push($t3)
+   push($t1)
+   push($t0)
+   jal draw_box
+   __caller_restore()
+   
+   return_write_intermediate_playing_area_box_to_display:
+   jr $ra
+   
+# no arguments
+draw_intermediate_playing_area:
+    li $t0, 0 # x address of the intermediate playing area
+    li $t1, 4 # y address of the intermediate playing area
+    
+    lb $t5, GAME_AREA_WIDTH # x - limit
+    lb $t6, GAME_AREA_HEIGHT # y - limit
+    addi $t6, $t6, 4
+    
+    draw_intermediate_playing_area_loop_0:
+        # go through each row
+        li $t0, 0
+        draw_intermediate_playing_area_loop_1:
+            # go through each box
+            __caller_prep()
+            push($t1)
+            push($t0)
+            jal write_intermediate_playing_area_box_to_display
+            __caller_restore()
+            
+            addi $t0, $t0, 1
+            blt $t0, $t5, draw_intermediate_playing_area_loop_1 
+            
+        addi $t1, $t1, 1
+        blt $t1, $t6, draw_intermediate_playing_area_loop_0
+    jr $ra
+
+
+# 0: tet_code
+# returns
+# 0: tet draw zone in $v0
+# 1: tet color code in $v1
+get_tet:
+    pop($t0)
+    li $t3, 8 # memory size of a tetramino object = 2 words
+    
+    mult $t0, $t0, $t3
+    la $t3, TET
+    add $t0, $t0, $t3 # t2 is the tetramino address
+    
+    lw $v0, 0($t0) # load the tetramino draw zone from definition
+    lw $v1, 4($t0) # load tetramino color code
+    jr $ra
+    
+# 0: x
+# 1: y
+# 2: tet code
+# returns: 0 if written, -1 if it went out of bounds in $v0
 draw_tet:
     pop($t0)
     pop($t1)
     pop($t2)
+    __callee_prep()
     
-    lb $t3, TET_SIZE
-    mult $t2, $t2, $t3
-    la $t3, TET
-    add $t2, $t2, $t3
+    __caller_prep()
+    push($t2)
+    jal get_tet
+    __caller_restore()
     
-    lw $t3, 0($t2) # load the tetramino draw zone from definition
-    lw $t4, 4($t2) # load tetramino color
+    move $t3, $v0 # load the tetramino draw zone from definition
+    move $t4, $v1 # load tetramino color code
     
-    add $t5, $t0, 4 # x boundary
-    add $t6, $t1, 4 # y boundary
     
-    move $t8, $t0 # x saved
+    add $t5, $t0, 3 # x boundary
+    add $t6, $t1, 3 # y boundary
+    
+    move $t8, $t5 # x saved
+    
+    lb $s0, GAME_AREA_WIDTH # checkers
+    lb $s1, GAME_AREA_HEIGHT
+    addi $s1, $s1, 4
     
     # draw while right shifting
     # from the draw zone
     draw_tet_loop_0:
-        move $t0, $t8
+        move $t5, $t8
         draw_tet_loop_0_0:
             li $t7, 1 # mask for getting which box to draw from drawzone
             and $t7, $t3, $t7 # 1 if drawing 0 otw
             beq $t7, 0, draw_tet_loop_0_0_nodraw
             
+            blt $t5, 0, draw_tet_failure
+            blt $t6, 0, draw_tet_failure
+            bge $t5, $s0, draw_tet_failure
+            bge $t6, $s1, draw_tet_failure
+            
             __caller_prep()
             push($t4) # color
-            push($t1) # y
-            push($t0) # x
-            jal draw_box
+            push($t6) # y
+            push($t5) # x
+            li $a0, 1 # write to next intermediate playing area
+            jal write_intermediate_playing_area_box
             __caller_restore()
             
             draw_tet_loop_0_0_nodraw:
-            addi $t0, $t0, 1
+            subi $t5, $t5, 1
             srl $t3, $t3, 1
-            bne $t0, $t5, draw_tet_loop_0_0
-        addi $t1, $t1, 1
-        bne $t1, $t6, draw_tet_loop_0
-    jr $ra
-
-
-# 0: x, 1: y, 2: color
-# x, y in units, from top left of the
-# game area being 0, 0
-# TODO: switch from drawing on the display
-# to an intermediate grid
-draw_box_inside_grid:
-    jr $ra
-
-
-# 0: x
-# 1: y
-# 2: tet code
-# returns 1 for collisions, 0 for no collisions in $v0
-check_collisions:
+            bge $t5, $t0, draw_tet_loop_0_0
+        subi $t6, $t6, 1
+        bge $t6, $t1, draw_tet_loop_0
+        
+    draw_tet_success:
+        __callee_restore()
+        li $v0, 0
+        jr $ra
     
+    draw_tet_failure:
+        __callee_restore()
+        li $v0, -1
+        jr $ra
+    
+    
+# 0: area address 0 (values taken from)
+# 1: area address 1 (values written to)
+copy_intermediate_game_area:
+    li $t0, 0
+    pop($t1)
+    pop($t2)
+    
+    copy_intermediate_game_area_0:
+        lb $t3, 0($t1)
+        sb $t3, 0($t2)
+        
+        addi $t1, $t1, 1
+        addi $t2, $t2, 1
+        addi $t0, $t3, 1
+        
+        blt $t0, 312, copy_intermediate_game_area_0
+    jr $ra
 
-
+    
 # runs the game loop
 game_loop:
-    game_loop_setup:
-        li $t0, 3
-        li $t1, 3
-        li $t2, 0
-    game_loop_loop:
+    # game_loop_setup:
+        li $t0, 0 # x
+        li $t1, 0 # y
+        li $t2, 1 # tet code
+        li $t9, 0 # loop counter
         __caller_prep()
         jal draw_grid
         __caller_restore()
         
-        # Check keyboard for actions!
-        lw $t3, KEYBOARD_ADDR
-        lw $t4, 0($t3)
-        bne $t4, 1, game_loop_loop_no_keyboard_events
-        lw $t4, 4($t3)
+        __caller_prep()
+        jal initialize_intermediate_playing_area
+        __caller_restore()
         
-        beq $t4, 0x61, pressed_key_is_a
-        beq $t4, 0x73, pressed_key_is_s
-        beq $t4, 0x64, pressed_key_is_d
-        beq $t4, 0x71, pressed_key_is_q
+    # game_loop_loop:
+        # __caller_prep()
+        # jal draw_grid
+        # __caller_restore()
         
-        b game_loop_loop_no_keyboard_events
+        # # Check keyboard for actions!
+        # lw $t3, KEYBOARD_ADDR
+        # lw $t4, 0($t3)
+        # bne $t4, 1, game_loop_loop_no_keyboard_events
+        # lw $t4, 4($t3)
         
-        pressed_key_is_a:
-            subi $t0, $t0, 1
-            b game_loop_loop_no_keyboard_events
-        pressed_key_is_s:
-            addi $t1, $t1, 1
-            b game_loop_loop_no_keyboard_events
-        pressed_key_is_d:
-            addi $t0, $t0, 1
-            b game_loop_loop_no_keyboard_events
-        pressed_key_is_q:
-            j exit
+        # beq $t4, 0x61, pressed_key_is_a
+        # beq $t4, 0x73, pressed_key_is_s
+        # beq $t4, 0x64, pressed_key_is_d
+        # beq $t4, 0x71, pressed_key_is_q
         
-        game_loop_loop_no_keyboard_events:
+        # b game_loop_loop_no_keyboard_events
+        
+        # pressed_key_is_a:
+            # subi $t0, $t0, 1
+            # b game_loop_loop_no_keyboard_events
+        # pressed_key_is_s:
+            # addi $t1, $t1, 1
+            # b game_loop_loop_no_keyboard_events
+        # pressed_key_is_d:
+            # addi $t0, $t0, 1
+            # b game_loop_loop_no_keyboard_events
+        # pressed_key_is_q:
+            # j exit
+        
+        # game_loop_loop_no_keyboard_events:
             
         
         
-        __caller_prep()
-        push($t2)
-        push($t1)
-        push($t0)
-        jal draw_tet
-        __caller_restore()
+        # __caller_prep()
+        # push($t2)
+        # push($t1)
+        # push($t0)
+        # jal draw_tet
+        # __caller_restore()
         
-        la $a0, LOG_GAME_LOOP
-        li $v0, 4
-        syscall
+        # # sleep for $a0 milliseconds
+        # li $a0, 8
+        # li $v0, 32
+        # syscall
         
-        # sleep for $a0 milliseconds
-        li $a0, 8
-        li $v0, 32
-        syscall
-        b game_loop_loop
-    game_loop_exit:
-        jr $ra
+        # addi $t9, $t9, 1
+        # blt $t9, 45, skip_gravity
+        # li $t9, 0
+        # addi $t1, $t1, 1
+        
+        # skip_gravity:
+        
+        # b game_loop_loop
+    # game_loop_exit:
+        # jr $ra
 
 .entry main
 main:
+   
+    
+    li $t0, -1
+    li $t1, 5
+    li $t2, 1
     __caller_prep()
-    jal game_loop
+    push($t2)
+    push($t1)
+    push($t0)
+    jal draw_tet
     __caller_restore()
+    nop
+    
+    __caller_prep()
+    jal draw_intermediate_playing_area
+    __caller_restore()
+
+    # __caller_prep()
+    # jal game_loop
+    # __caller_restore()
     
 exit:
     li $v0, 10
