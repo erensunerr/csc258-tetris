@@ -346,7 +346,7 @@ draw_grid:
     jr $ra
     
 
-# no arguments
+# $a0: which playing area to initialize
 # no returns
 initialize_intermediate_playing_area:
     li $t1, 0 # y counter
@@ -367,7 +367,7 @@ initialize_intermediate_playing_area:
             __caller_prep()
             push($t7)
             push($t1)
-            push($t0)
+            push($t0) # a0 is passed directly to WIPAB
             jal write_intermediate_playing_area_box
             __caller_restore()
             
@@ -596,12 +596,17 @@ draw_tet:
         jr $ra
     
     
-# 0: area address 0 (values taken from)
-# 1: area address 1 (values written to)
+# 0: area address 0 (values taken from) -> 0 if current, otw next
+# 1: area address 1 (values written to) -> 0 if current otw, next
 copy_intermediate_game_area:
     li $t0, 0
     pop($t1)
     pop($t2)
+    
+    get_IPA($t1, $t1)
+    get_IPA($t2, $t2)
+    
+    beq $t1, $t2, copy_intermediate_game_area_exit
     
     copy_intermediate_game_area_0:
         lb $t3, 0($t1)
@@ -609,106 +614,111 @@ copy_intermediate_game_area:
         
         addi $t1, $t1, 1
         addi $t2, $t2, 1
-        addi $t0, $t3, 1
+        addi $t0, $t0, 1
         
         blt $t0, 312, copy_intermediate_game_area_0
-    jr $ra
+        
+    copy_intermediate_game_area_exit:
+        jr $ra
 
     
 # runs the game loop
 game_loop:
     # game_loop_setup:
-        li $t0, 0 # x
+        li $t0, 6 # x
         li $t1, 0 # y
         li $t2, 1 # tet code
         li $t9, 0 # loop counter
+        
         __caller_prep()
         jal draw_grid
         __caller_restore()
         
+        li $a0, 0
         __caller_prep()
         jal initialize_intermediate_playing_area
         __caller_restore()
         
-    # game_loop_loop:
-        # __caller_prep()
-        # jal draw_grid
-        # __caller_restore()
+    game_loop_loop:
+        __caller_prep()
+        jal draw_intermediate_playing_area
+        __caller_restore()
         
-        # # Check keyboard for actions!
-        # lw $t3, KEYBOARD_ADDR
-        # lw $t4, 0($t3)
-        # bne $t4, 1, game_loop_loop_no_keyboard_events
-        # lw $t4, 4($t3)
+        li $a0, 1
+        __caller_prep() # initialize next
+        jal initialize_intermediate_playing_area
+        __caller_restore()
         
-        # beq $t4, 0x61, pressed_key_is_a
-        # beq $t4, 0x73, pressed_key_is_s
-        # beq $t4, 0x64, pressed_key_is_d
-        # beq $t4, 0x71, pressed_key_is_q
+        # Check keyboard for actions!
+        lw $t3, KEYBOARD_ADDR
+        lw $t4, 0($t3)
+        bne $t4, 1, game_loop_loop_no_keyboard_events
+        lw $t4, 4($t3)
         
-        # b game_loop_loop_no_keyboard_events
+        beq $t4, 0x61, pressed_key_is_a
+        beq $t4, 0x73, pressed_key_is_s
+        beq $t4, 0x64, pressed_key_is_d
+        beq $t4, 0x71, pressed_key_is_q
         
-        # pressed_key_is_a:
-            # subi $t0, $t0, 1
-            # b game_loop_loop_no_keyboard_events
-        # pressed_key_is_s:
-            # addi $t1, $t1, 1
-            # b game_loop_loop_no_keyboard_events
-        # pressed_key_is_d:
-            # addi $t0, $t0, 1
-            # b game_loop_loop_no_keyboard_events
-        # pressed_key_is_q:
-            # j exit
+        b game_loop_loop_no_keyboard_events
         
-        # game_loop_loop_no_keyboard_events:
-            
+        pressed_key_is_a:
+            subi $t0, $t0, 1
+            b game_loop_loop_no_keyboard_events
+        pressed_key_is_s:
+            addi $t1, $t1, 1
+            b game_loop_loop_no_keyboard_events
+        pressed_key_is_d:
+            addi $t0, $t0, 1
+            b game_loop_loop_no_keyboard_events
+        pressed_key_is_q:
+            j exit
         
+        game_loop_loop_no_keyboard_events:
         
-        # __caller_prep()
-        # push($t2)
-        # push($t1)
-        # push($t0)
-        # jal draw_tet
-        # __caller_restore()
+        __caller_prep() # draws to next
+        push($t2)
+        push($t1)
+        push($t0)
+        jal draw_tet
+        __caller_restore()
         
-        # # sleep for $a0 milliseconds
-        # li $a0, 8
-        # li $v0, 32
-        # syscall
+        # if it's valid copy the next to current
         
-        # addi $t9, $t9, 1
-        # blt $t9, 45, skip_gravity
-        # li $t9, 0
-        # addi $t1, $t1, 1
+        bne $v0, 0, game_loop_invalid_next
         
-        # skip_gravity:
+        li $t3, 1 # copy from next to current
+        li $t4, 0
         
-        # b game_loop_loop
-    # game_loop_exit:
-        # jr $ra
+        __caller_prep()
+        push($t4)
+        push($t3)
+        jal copy_intermediate_game_area
+        __caller_restore()
+        
+        game_loop_invalid_next:
+        
+        # sleep for $a0 milliseconds
+        li $a0, 8
+        li $v0, 32
+        syscall
+        
+        addi $t9, $t9, 1
+        blt $t9, 45, skip_gravity
+        li $t9, 0
+        addi $t1, $t1, 1
+        
+        skip_gravity:
+        b game_loop_loop
+        
+    game_loop_exit:
+        jr $ra
 
 .entry main
 main:
-   
-    
-    li $t0, -1
-    li $t1, 5
-    li $t2, 1
     __caller_prep()
-    push($t2)
-    push($t1)
-    push($t0)
-    jal draw_tet
+    jal game_loop
     __caller_restore()
-    nop
-    
-    __caller_prep()
-    jal draw_intermediate_playing_area
-    __caller_restore()
-
-    # __caller_prep()
-    # jal game_loop
-    # __caller_restore()
     
 exit:
     li $v0, 10
