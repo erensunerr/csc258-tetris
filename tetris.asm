@@ -72,6 +72,8 @@
         la %load, NEXT_INTERMEDIATE_PLAYING_AREA
     get_IPA_end:
 .end_macro
+
+
 # DATA
 
 
@@ -161,8 +163,8 @@
         
     NEXT_TET:
         .word 0 # tet code
-        
-        
+
+
 # CODE
 
 
@@ -571,6 +573,17 @@ draw_tet:
             bge $t6, $s1, draw_tet_failure
             
             __caller_prep()
+            push($t6)
+            push($t5)
+            li $a0, 1 # read from next IPA
+            jal read_intermediate_playing_area_box
+            __caller_restore()
+            
+            # 0 or 1 is okay to overwrite, but nothing else!
+            andi $t9, $v0, -2
+            bne $t9, 0, draw_tet_failure
+            
+            __caller_prep()
             push($t4) # color
             push($t6) # y
             push($t5) # x
@@ -625,9 +638,9 @@ copy_intermediate_game_area:
 # runs the game loop
 game_loop:
     # game_loop_setup:
-        li $t0, 6 # x
+        li $t0, 0 # x
         li $t1, 0 # y
-        li $t2, 1 # tet code
+        li $t2, 5 # tet code
         li $t9, 0 # loop counter
         
         __caller_prep()
@@ -648,6 +661,10 @@ game_loop:
         __caller_prep() # initialize next
         jal initialize_intermediate_playing_area
         __caller_restore()
+        
+        # Save the values before trying the change
+        push($t0)
+        push($t1)
         
         # Check keyboard for actions!
         lw $t3, KEYBOARD_ADDR
@@ -684,8 +701,7 @@ game_loop:
         __caller_restore()
         
         # if it's valid copy the next to current
-        
-        bne $v0, 0, game_loop_invalid_next
+        bne $v0, 0, game_loop_loop_invalid_next
         
         li $t3, 1 # copy from next to current
         li $t4, 0
@@ -696,7 +712,20 @@ game_loop:
         jal copy_intermediate_game_area
         __caller_restore()
         
-        game_loop_invalid_next:
+        j game_loop_loop_valid_next
+        
+        game_loop_loop_invalid_next:
+        # restore the values
+        pop($t1)
+        pop($t0)
+        j game_loop_loop_after
+        
+        game_loop_loop_valid_next:
+        
+        # trash the saved t0 and t1 values
+        addi $sp, $sp, 8
+        
+        game_loop_loop_after:
         
         # sleep for $a0 milliseconds
         li $a0, 8
@@ -709,12 +738,17 @@ game_loop:
         addi $t1, $t1, 1
         
         skip_gravity:
+        nop
         b game_loop_loop
         
     game_loop_exit:
         jr $ra
 
 .entry main
+# TODO: 1. rotate, line clearing.
+# TODO: 2. next tetramino, modal (game over, start the game)
+# TODO: 3. write_text, score, modal texts
+
 main:
     __caller_prep()
     jal game_loop
