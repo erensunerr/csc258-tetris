@@ -704,6 +704,38 @@ rotate_left:
     move $v0, $t2
     jr $ra
 
+# $a0: which IPA to do this on
+# returns a bitmap (1 for full, 0 for not) from bottom to 4th row (first displayed)
+detect_full_rows:
+  lb $t1, GAME_AREA_HEIGHT # start from the bottom row
+  li $t2, 0
+  detect_full_rows_loop_y:
+    lb $t0, GAME_AREA_WIDTH
+    li $t3, 1
+    detect_full_rows_loop_x:
+        __caller_prep()
+        push($t1)
+        push($t0)
+        jal read_intermediate_playing_area_box
+        __caller_restore()
+        and $t4, $v0, -2 # remove the last bit (0 or 1)
+        # if $t4 is 0 this box is empty
+        beq $t4, 0, detect_full_row_empty # this row is empty
+        subi $t0, $t0, 1
+        bne $t0, 0, detect_full_rows_loop_x
+        j detect_full_row_y_end
+    detect_full_row_empty:
+    li $t3, 0
+    detect_full_row_y_end:
+    or $t2, $t2, $t3
+    sll $t2, $t2, 1
+    subi $t1, $t1, 1
+    bge $t1, 4, detect_full_rows_loop_y
+    
+    move $v0, $t2
+    jr $ra
+
+
 # runs the game loop
 game_loop:
     # game_loop_setup:
@@ -747,6 +779,12 @@ game_loop:
         jal copy_intermediate_game_area
         __caller_restore()
         
+        # detect full rows in static and remove them
+        li $a0, 2
+        __caller_prep()
+        jal detect_full_rows
+        __caller_restore()
+        nop
         # change tet number and reset the x and y
         li $t0, 4 # x
         li $t1, 0 # y
@@ -874,8 +912,8 @@ game_loop:
         jr $ra
 
 .entry main
-# TODO: 1. rotate, next random tetramino, static IPA.
-# TODO: 2. modal (game over, start the game), next tetramino
+# TODO: 1. row detection and removal
+# TODO: 2. modal (game over, start the game)
 # TODO: 3. write_text, score, modal texts
 
 main:
