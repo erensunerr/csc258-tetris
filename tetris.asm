@@ -533,21 +533,38 @@ get_tet:
 # 0: x
 # 1: y
 # 2: tet code
-# returns: 0 if written, -1 if it went out of bounds in $v0
+# 3: rotation -> 0 for up, then +1 for each left rotation
+# returns: $v0: 0 if written, -1 if it went out of bounds, -2 if overwriting an existing cell
 draw_tet:
     pop($t0)
     pop($t1)
-    pop($t2)
-    __callee_prep()
+    pop($t2) # t2 has the tet code
     
     __caller_prep()
     push($t2)
     jal get_tet
     __caller_restore()
     
+    pop($t2) # t2 has the rotation
+    
+    __callee_prep()
+    
     move $t3, $v0 # load the tetramino draw zone from definition
     move $t4, $v1 # load tetramino color code
     
+    
+    # perform rotations
+    beq $t2, 0, draw_tet_no_rotation
+    draw_tet_rotate_left:
+        __caller_prep()
+        push($t3)
+        jal rotate_left
+        __caller_restore()
+        move $t3, $v0
+        subi $t2, $t2, 1
+        bne $t2, 0, draw_tet_rotate_left
+        
+    draw_tet_no_rotation:
     
     add $t5, $t0, 3 # x boundary
     add $t6, $t1, 3 # y boundary
@@ -581,7 +598,7 @@ draw_tet:
             
             # 0 or 1 is okay to overwrite, but nothing else!
             andi $t9, $v0, -2
-            bne $t9, 0, draw_tet_failure
+            bne $t9, 0, draw_tet_failure_overwrite
             
             __caller_prep()
             push($t4) # color
@@ -606,6 +623,11 @@ draw_tet:
     draw_tet_failure:
         __callee_restore()
         li $v0, -1
+        jr $ra
+    
+    draw_tet_failure_overwrite:
+        __callee_restore()
+        li $v0, -2
         jr $ra
     
     
@@ -634,13 +656,44 @@ copy_intermediate_game_area:
     copy_intermediate_game_area_exit:
         jr $ra
 
+# 0: draw zone
+# 1: bit number
+# 0 or 1 in $v0
+get_bit:
+    pop($t0)
+    pop($t1)
+    beq $t1, 0, get_bit_noloop
+    get_bit_loop:
+        srl $t0, $t0, 1
+        subi $t1, $t1, 1
+        bgt $t1, 0, get_bit_loop
+        
+    get_bit_noloop:
+        andi $v0, $t0, 1 # get the last bit
+    jr $ra
     
+    
+# 0: draw zone
+# v0 contains the counterclockwise rotated draw zone
+rotate_left:
+    pop($t0)
+    li $t1, 13
+    li $v0, 0
+    rotate_left_0:
+        rotate_left_0_0:
+            nop
+            subi $t1, $t1, 4
+            blt $t1, 0, rotate_left_0_0
+        addi $t1, $t1, 13
+    jr $ra
+
 # runs the game loop
 game_loop:
     # game_loop_setup:
-        li $t0, 0 # x
-        li $t1, 0 # y
+        li $t0, 5 # x
+        li $t1, 5 # y
         li $t2, 5 # tet code
+        li $t5, 0 # rotation
         li $t9, 0 # loop counter
         
         __caller_prep()
@@ -665,6 +718,7 @@ game_loop:
         # Save the values before trying the change
         push($t0)
         push($t1)
+        push($t5)
         
         # Check keyboard for actions!
         lw $t3, KEYBOARD_ADDR
@@ -676,31 +730,35 @@ game_loop:
         beq $t4, 0x73, pressed_key_is_s
         beq $t4, 0x64, pressed_key_is_d
         beq $t4, 0x71, pressed_key_is_q
+        beq $t4, 0x77, pressed_key_is_w
         
         b game_loop_loop_no_keyboard_events
         
         pressed_key_is_a:
-            subi $t0, $t0, 1
+            subi $t0, $t0, 1 # x - 1
             b game_loop_loop_no_keyboard_events
         pressed_key_is_s:
-            addi $t1, $t1, 1
+            addi $t1, $t1, 1 # y - 1
             b game_loop_loop_no_keyboard_events
         pressed_key_is_d:
-            addi $t0, $t0, 1
+            addi $t0, $t0, 1 # x + 1
             b game_loop_loop_no_keyboard_events
         pressed_key_is_q:
-            j exit
+            j exit # exit
+        pressed_key_is_w:
+            addi $t5, $t5, 1 # rotate + 1
         
         game_loop_loop_no_keyboard_events:
         
         __caller_prep() # draws to next
-        push($t2)
-        push($t1)
-        push($t0)
+        push($t5) # rotation
+        push($t2) # tet code
+        push($t1) # y
+        push($t0) # x
         jal draw_tet
         __caller_restore()
         
-        # if it's valid copy the next to current
+        # if it's valid, copy next to current
         bne $v0, 0, game_loop_loop_invalid_next
         
         li $t3, 1 # copy from next to current
@@ -716,6 +774,7 @@ game_loop:
         
         game_loop_loop_invalid_next:
         # restore the values
+        pop($t5)
         pop($t1)
         pop($t0)
         j game_loop_loop_after
@@ -723,7 +782,7 @@ game_loop:
         game_loop_loop_valid_next:
         
         # trash the saved t0 and t1 values
-        addi $sp, $sp, 8
+        addi $sp, $sp, 12
         
         game_loop_loop_after:
         
@@ -745,8 +804,8 @@ game_loop:
         jr $ra
 
 .entry main
-# TODO: 1. rotate, line clearing.
-# TODO: 2. next tetramino, modal (game over, start the game)
+# TODO: 1. rotate, next random tetramino, static IPA.
+# TODO: 2. modal (game over, start the game), next tetramino
 # TODO: 3. write_text, score, modal texts
 
 main:
