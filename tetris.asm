@@ -63,13 +63,22 @@
 
 
 .macro get_IPA(%det, %load)
-    # if %det == 0, return the address of the normal IPA, next IPA otw
-    beq %det, 0, get_IPA_next
-    
-    la %load, INTERMEDIATE_PLAYING_AREA
+    # %det: 0 -> IPA, 1 -> NEXT_IPA, 2 -> STATIC_IPA, otw unchanged
+    beq %det, 0, get_IPA_current
+    beq %det, 1, get_IPA_next
+    beq %det, 2, get_IPA_static
     j get_IPA_end
+    
+    get_IPA_current:
+        la %load, INTERMEDIATE_PLAYING_AREA
+        j get_IPA_end
     get_IPA_next:
         la %load, NEXT_INTERMEDIATE_PLAYING_AREA
+        j get_IPA_end
+    get_IPA_static:
+        la %load, STATIC_INTERMEDIATE_PLAYING_AREA
+        j get_IPA_end
+    
     get_IPA_end:
 .end_macro
 
@@ -145,6 +154,10 @@
         # for the next turn, if it satisfies the representation invariants
         .space 312
     
+    STATIC_INTERMEDIATE_PLAYING_AREA:
+        # this includes the landed tetraminoes
+        .space 312
+    
     COLOR_LOOKUP:
         .word 0x000000 # checkerboard - 0
         .word 0x242323 # checkerboard - 1
@@ -155,15 +168,6 @@
         .word 0xff00ff
         .word 0xffff00
         .word 0xffffff # tet - 6
-        
-    CURR_TET:
-        .word 0 # tet code
-        .word 0 # x
-        .word 0 # y
-        .word 0 # rotation 0
-        
-    NEXT_TET:
-        .word 0 # tet code
 
 
 # CODE
@@ -714,31 +718,61 @@ game_loop:
     jal initialize_intermediate_playing_area
     __caller_restore()
     
+    li $a0, 2
+    __caller_prep() # initialize static
+    jal initialize_intermediate_playing_area
+    __caller_restore()
+    
+    # Initialize the first tetramino
+    li $t0, 4 # x
+    li $t1, 0 # y
+    li $t5, 0 # rotation
+    li $t9, 0 # loop counter
+    
+    # Generate random tet code
+    li $v0, 41
+    li $a0, 0
+    syscall   
+    divu $a0, $a0, 7 # modulo by 7
+    mfhi $t2
+    
     game_loop_tetramino_landed:
+        # copy current to static
+        li $t3, 0
+        li $t4, 2
+        
+        __caller_prep()
+        push($t4)
+        push($t3)
+        jal copy_intermediate_game_area
+        __caller_restore()
+        
         # change tet number and reset the x and y
         li $t0, 4 # x
         li $t1, 0 # y
-        li $t2, 2 # tet code
         li $t5, 0 # rotation
         li $t9, 0 # loop counter
         
         # Generate random tet code
         li $v0, 41
         li $a0, 0
-        syscall
-    
-        # modulo by 7
-        divu $a0, $a0, 7
+        syscall   
+        divu $a0, $a0, 7 # modulo by 7
         mfhi $t2
-          
+        
     game_loop_loop:
         __caller_prep()
         jal draw_intermediate_playing_area
         __caller_restore()
         
-        li $a0, 1
-        __caller_prep() # initialize next
-        jal initialize_intermediate_playing_area
+        # copy static to next
+        li $t3, 2
+        li $t4, 1
+        
+        __caller_prep()
+        push($t4)
+        push($t3)
+        jal copy_intermediate_game_area
         __caller_restore()
         
         # Save the values before trying the change
@@ -800,15 +834,13 @@ game_loop:
         
         beq $v0, 0, game_loop_loop_valid_next
         
-        # Check if tetramino is landed
-        # TODO: change this to support stacking
-        # TODO: that means having a specific error code for
-        # when bottom of the tetramino touches (!) something
-        # IDEA: check if the cause of the change is an increase in y
+        # game_loop_loop_invalid_next:
         
-        bge $t1, 23, game_loop_tetramino_landed
+        # check if the tetramino is landed by checking if the cause of the
+        # invalidation is a change in y.
+        lw $t3, 4($sp) # last valid y value
+        bne $t1, $t3, game_loop_tetramino_landed
         
-        game_loop_loop_invalid_next:
         # restore the values
         pop($t5)
         pop($t1)
