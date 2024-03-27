@@ -703,21 +703,34 @@ rotate_left:
 # runs the game loop
 game_loop:
     # game_loop_setup:
-        li $t0, 5 # x
-        li $t1, 5 # y
+    __callee_prep()
+    
+    __caller_prep()
+    jal draw_grid
+    __caller_restore()
+    
+    li $a0, 0
+    __caller_prep() # initialize current IPA
+    jal initialize_intermediate_playing_area
+    __caller_restore()
+    
+    game_loop_tetramino_landed:
+        # change tet number and reset the x and y
+        li $t0, 4 # x
+        li $t1, 0 # y
         li $t2, 2 # tet code
         li $t5, 0 # rotation
         li $t9, 0 # loop counter
         
-        __caller_prep()
-        jal draw_grid
-        __caller_restore()
-        
+        # Generate random tet code
+        li $v0, 41
         li $a0, 0
-        __caller_prep()
-        jal initialize_intermediate_playing_area
-        __caller_restore()
-        
+        syscall
+    
+        # modulo by 7
+        divu $a0, $a0, 7
+        mfhi $t2
+          
     game_loop_loop:
         __caller_prep()
         jal draw_intermediate_playing_area
@@ -733,10 +746,21 @@ game_loop:
         push($t1)
         push($t5)
         
+        # apply gravity
+        addi $t9, $t9, 1
+        blt $t9, 45, skip_gravity
+        li $t9, 0
+        addi $t1, $t1, 1
+        
+        # skip keyboard events if gravity is applied
+        j game_loop_loop_no_events
+        
+        skip_gravity:
+        
         # Check keyboard for actions!
         lw $t3, KEYBOARD_ADDR
         lw $t4, 0($t3)
-        bne $t4, 1, game_loop_loop_no_keyboard_events
+        bne $t4, 1, game_loop_loop_no_events
         lw $t4, 4($t3)
         
         beq $t4, 0x61, pressed_key_is_a
@@ -745,23 +769,26 @@ game_loop:
         beq $t4, 0x71, pressed_key_is_q
         beq $t4, 0x77, pressed_key_is_w
         
-        b game_loop_loop_no_keyboard_events
+        b game_loop_loop_no_events
         
         pressed_key_is_a:
             subi $t0, $t0, 1 # x - 1
-            b game_loop_loop_no_keyboard_events
+            b game_loop_loop_no_events
         pressed_key_is_s:
             addi $t1, $t1, 1 # y - 1
-            b game_loop_loop_no_keyboard_events
+            b game_loop_loop_no_events
         pressed_key_is_d:
             addi $t0, $t0, 1 # x + 1
-            b game_loop_loop_no_keyboard_events
+            b game_loop_loop_no_events
         pressed_key_is_q:
             j exit # exit
         pressed_key_is_w:
             addi $t5, $t5, 1 # rotate + 1
+            div $t5, $t5, 4
+            mfhi $t5
+            b game_loop_loop_no_events
         
-        game_loop_loop_no_keyboard_events:
+        game_loop_loop_no_events:
         
         __caller_prep() # draws to next
         push($t5) # rotation
@@ -771,19 +798,15 @@ game_loop:
         jal draw_tet
         __caller_restore()
         
-        # if it's valid, copy next to current
-        bne $v0, 0, game_loop_loop_invalid_next
+        beq $v0, 0, game_loop_loop_valid_next
         
-        li $t3, 1 # copy from next to current
-        li $t4, 0
+        # Check if tetramino is landed
+        # TODO: change this to support stacking
+        # TODO: that means having a specific error code for
+        # when bottom of the tetramino touches (!) something
+        # IDEA: check if the cause of the change is an increase in y
         
-        __caller_prep()
-        push($t4)
-        push($t3)
-        jal copy_intermediate_game_area
-        __caller_restore()
-        
-        j game_loop_loop_valid_next
+        bge $t1, 23, game_loop_tetramino_landed
         
         game_loop_loop_invalid_next:
         # restore the values
@@ -793,27 +816,29 @@ game_loop:
         j game_loop_loop_after
         
         game_loop_loop_valid_next:
+        # if it's valid, copy next to current
+        li $t3, 1
+        li $t4, 0
+        
+        __caller_prep()
+        push($t4)
+        push($t3)
+        jal copy_intermediate_game_area
+        __caller_restore()
         
         # trash the saved t0 and t1 values
         addi $sp, $sp, 12
         
         game_loop_loop_after:
-        
         # sleep for $a0 milliseconds
         li $a0, 8
         li $v0, 32
         syscall
         
-        addi $t9, $t9, 1
-        blt $t9, 45, skip_gravity
-        li $t9, 0
-        addi $t1, $t1, 1
-        
-        skip_gravity:
-        nop
         b game_loop_loop
         
     game_loop_exit:
+        __callee_restore()
         jr $ra
 
 .entry main
