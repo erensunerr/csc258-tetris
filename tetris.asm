@@ -110,15 +110,16 @@
     # data + 24
     TET:
         # for each tetramino, the least significant 16 bits (= 2 bytes) of the *first word*
-        # is the draw zones in a 4x4 grid from top left to bottom right
+        # is the draw zones in a 4x4 grid from top left (most significant) to bottom right (least significant)
         # the last 4 bytes is the color
         # so each tetramino is 4 + 4 = 8 bytes
         TET_0:
-            .word 0b1100110000000000 # least significant 16 bits
+            .word 0b0000011001100000 # least significant 16 bits
             .word 2
         TET_1:
-            .word 0b1000100010001000
+            .word 0b0100010001000100
             .word 3
+        # TODO: center align the rest
         TET_2:
             .word 0b0110110000000000
             .word 4
@@ -677,14 +678,26 @@ get_bit:
 # v0 contains the counterclockwise rotated draw zone
 rotate_left:
     pop($t0)
-    li $t1, 13
+    li $t1, 12
+    li $t2, 0
     li $v0, 0
     rotate_left_0:
         rotate_left_0_0:
             nop
+            __caller_prep()
+            push($t1)
+            push($t0)
+            jal get_bit
+            __caller_restore()
+            sll $t2, $t2, 1
+            or $t2, $t2, $v0 # or the result
             subi $t1, $t1, 4
-            blt $t1, 0, rotate_left_0_0
-        addi $t1, $t1, 13
+            nop
+            bgt $t1, -1, rotate_left_0_0
+        addi $t1, $t1, 17
+        nop
+        bne $t1, 16, rotate_left_0
+    move $v0, $t2
     jr $ra
 
 # runs the game loop
@@ -692,7 +705,7 @@ game_loop:
     # game_loop_setup:
         li $t0, 5 # x
         li $t1, 5 # y
-        li $t2, 5 # tet code
+        li $t2, 2 # tet code
         li $t5, 0 # rotation
         li $t9, 0 # loop counter
         
