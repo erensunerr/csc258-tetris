@@ -168,8 +168,9 @@
         .word 0xff00ff
         .word 0xffff00
         .word 0xffffff # tet - 6
-
-
+    
+    FONT: # in order 
+        
 # CODE
 
 
@@ -704,13 +705,16 @@ rotate_left:
     move $v0, $t2
     jr $ra
 
+
 # $a0: which IPA to do this on
 # returns a bitmap (1 for full, 0 for not) from bottom to 4th row (first displayed)
 detect_full_rows:
   lb $t1, GAME_AREA_HEIGHT # start from the bottom row
+  addi $t1, $t1, 3
   li $t2, 0
   detect_full_rows_loop_y:
     lb $t0, GAME_AREA_WIDTH
+    subi $t0, $t0, 1
     li $t3, 1
     detect_full_rows_loop_x:
         __caller_prep()
@@ -720,27 +724,122 @@ detect_full_rows:
         __caller_restore()
         and $t4, $v0, -2 # remove the last bit (0 or 1)
         # if $t4 is 0 this box is empty
-        beq $t4, 0, detect_full_row_empty # this row is empty
+        beq $t4, 0, detect_full_rows_empty # this row is empty
         subi $t0, $t0, 1
         bne $t0, 0, detect_full_rows_loop_x
-        j detect_full_row_y_end
-    detect_full_row_empty:
+        j detect_full_rows_y_end
+    detect_full_rows_empty:
     li $t3, 0
-    detect_full_row_y_end:
+    detect_full_rows_y_end:
     or $t2, $t2, $t3
     sll $t2, $t2, 1
     subi $t1, $t1, 1
     bge $t1, 4, detect_full_rows_loop_y
     
+    # when the last one is hit, the rows will be shifted anyway
+    # so right shift
+    srl $t2, $t2, 1
     move $v0, $t2
     jr $ra
 
 
+# $a0: IPA code
+#0: row number
+remove_single_row:
+    pop($t1)
+    lb $t0, GAME_AREA_WIDTH
+    subi $t0, $t0, 1 
+    
+    andi $t3, $t1, 1 # last bit is color code
+    
+    # Replace the row with checkerboard pattern
+    remove_single_row_loop_0:
+        # invert $t3
+        addi $t3, $t3, 1
+        andi $t3, $t3, 1
+        
+        __caller_prep()
+        push($t3)
+        push($t1)
+        push($t0)
+        jal write_intermediate_playing_area_box
+        __caller_restore()
+        
+        subi $t0, $t0, 1
+        bgez $t0, remove_single_row_loop_0
+        
+    # Move the rows above down   
+    remove_single_row_move_0:
+        # Go current row to 4
+        subi $t2, $t1, 1
+        lb $t0, GAME_AREA_WIDTH
+        subi $t0, $t0, 1 # subtract for 0 based indexing
+        andi $t3, $t1, 1 # last bit is color code for checkerboard replacing
+        remove_single_row_move_1:
+            # read from row $t2, write to row $t1
+            __caller_prep()
+            push($t2)
+            push($t0)
+            jal read_intermediate_playing_area_box
+            __caller_restore()
+            
+            # if not a tetramino, don't move it
+            andi $t5, $v0, -2
+            beq $t5, 0, remove_single_row_nomove
+            
+            __caller_prep()
+            push($v0)
+            push($t1)
+            push($t0)
+            jal write_intermediate_playing_area_box
+            __caller_restore()
+            
+            # replace the moved square
+            add $t3, $t2, $t0
+            andi $t3, $t3, 1
+            
+            __caller_prep()
+            push($t3)
+            push($t2)
+            push($t0)
+            jal write_intermediate_playing_area_box
+            __caller_restore()
+            
+            remove_single_row_nomove:
+            
+            subi $t0, $t0, 1
+            bgez $t0, remove_single_row_move_1
+        subi $t1, $t1, 1
+        bge $t1, 3, remove_single_row_move_0
+    jr $ra
+        
+        
+# 0: number produced by detect full rows
+remove_rows:
+    pop($t0)
+    lb $t1, GAME_AREA_HEIGHT
+    addi $t1, $t1, 4
+    li $t2, 4 # height counter
+    
+    remove_rows_loop_0:
+        andi $t4, $t0, 1
+        beq $t4, 0, remove_rows_noremove
+        remove_rows_remove:
+        
+        __caller_prep()
+        push($t2) 
+        jal remove_single_row
+        __caller_restore()
+        
+        remove_rows_noremove:
+        srl $t0, $t0, 1
+        addi $t2, $t2, 1
+        blt $t2, $t1, remove_rows_loop_0
+    jr $ra
+
 # runs the game loop
 game_loop:
     # game_loop_setup:
-    __callee_prep()
-    
     __caller_prep()
     jal draw_grid
     __caller_restore()
@@ -755,21 +854,21 @@ game_loop:
     jal initialize_intermediate_playing_area
     __caller_restore()
     
-    # Initialize the first tetramino
-    li $t0, 4 # x
-    li $t1, 0 # y
-    li $t5, 0 # rotation
-    li $t9, 0 # loop counter
+    # # Initialize the first tetramino
+    # li $t0, 4 # x
+    # li $t1, 0 # y
+    # li $t5, 0 # rotation
+    # li $t9, 0 # loop counter
     
-    # Generate random tet code
-    li $v0, 41
-    li $a0, 0
-    syscall   
-    divu $a0, $a0, 7 # modulo by 7
-    mfhi $t2
+    # # Generate random tet code
+    # li $v0, 41
+    # li $a0, 0
+    # syscall   
+    # divu $a0, $a0, 7 # modulo by 7
+    # mfhi $t2
     
     game_loop_tetramino_landed:
-        # copy current to static
+        # # copy current to static
         li $t3, 0
         li $t4, 2
         
@@ -784,6 +883,12 @@ game_loop:
         __caller_prep()
         jal detect_full_rows
         __caller_restore()
+        
+        __caller_prep()
+        push($v0)
+        jal remove_rows
+        __caller_restore()
+        
         nop
         # change tet number and reset the x and y
         li $t0, 4 # x
@@ -797,6 +902,9 @@ game_loop:
         syscall   
         divu $a0, $a0, 7 # modulo by 7
         mfhi $t2
+        
+        # For debugging, set tetramino to 1
+        li $t2, 1
         
     game_loop_loop:
         __caller_prep()
@@ -820,7 +928,7 @@ game_loop:
         
         # apply gravity
         addi $t9, $t9, 1
-        blt $t9, 45, skip_gravity
+        blt $t9, 31, skip_gravity
         li $t9, 0
         addi $t1, $t1, 1
         
@@ -913,8 +1021,9 @@ game_loop:
 
 .entry main
 # TODO: 1. row detection and removal
+# TODO: 1.5 write_text
 # TODO: 2. modal (game over, start the game)
-# TODO: 3. write_text, score, modal texts
+# TODO: 3. score, modal texts
 
 main:
     __caller_prep()
