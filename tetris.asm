@@ -1,3 +1,6 @@
+# INCLUDES
+.include "font.asm"
+
 # MACROS
 
 
@@ -96,12 +99,12 @@
         .byte 128
     DISPLAY_W:
         .byte 64
-    UNIT: # sidelength of one block
+    UNIT: # sidelength of one block - not the unit in bitmap display
         .byte 4
     .align 1
     # data + 8
     
-    # x and y values are in unit_size dimensions, not pixels
+    # x and y values are in unit dimensions, not pixels
     GAME_AREA_TOP_LEFT:
     GAME_AREA_TOP_LEFT_x:
         .byte 2
@@ -168,11 +171,6 @@
         .word 0xff00ff
         .word 0xffff00
         .word 0xffffff # tet - 6
-    
-    FONT: # in order 
-        
-# CODE
-
 
 .text
 # 0: w x, 1: w y, 2: w color
@@ -837,11 +835,96 @@ remove_rows:
         blt $t2, $t1, remove_rows_loop_0
     jr $ra
 
+# 0: w x, 1: w y, 2: ascii code
+draw_letter:
+    pop($t0)
+    pop($t1)
+    pop($t2)
+    
+    # check if $t2 is a letter, digit or unknown
+    bgt $t2, 90, draw_letter_unknown
+    blt $t2, 48, draw_letter_unknown
+    subi $t4, $t2, 65
+    bgez $t4, draw_letter_letter
+    blt $t4, -6, draw_letter_digit
+    j draw_letter_unknown
+    
+    # Select the correct type of letter / digit
+    # $t2 has the address of the 16*16 glyph
+    draw_letter_letter:
+        subi $t2, $t2, 65
+        multu $t2, $t2, 256
+        la $t4, CHARACTERS
+        add $t2, $t2, $t4
+        j draw_letter_end_switch
+    draw_letter_digit:
+        subi $t2, $t2, 48
+        multu $t2, $t2, 256
+        la $t4, DIGITS
+        add $t2, $t2, $t4
+        j draw_letter_end_switch
+    draw_letter_unknown:
+        la $t2, UNKNOWN
+        
+    draw_letter_end_switch:
+    la $t4, DISPLAY_ADDR
+    lb $t5, DISPLAY_W
+    multu $t5, $t5, $t1
+    add $t5, $t5, $t0
+    multu $t5, $t5, 16 # 16 byte boxes for x and y
+    multu $t5, $t5, 4 # 4 byte colors
+    add $t4, $t4, $t5
+    # t4 has the address we should start writing from
+    
+    lb $t5, DISPLAY_W # delta to add for each row
+    subi $t5, $t5, 16
+    multu $t5, $t5, 4
+    
+    li $t9, 0xffffff # white
+    li $t8, 0 # black
+    
+    li $t1, 0
+    draw_letter_row:
+        li $t0, 0
+        lw $3, 0($t2)
+        draw_letter_pixel:
+            andi $t6, $t3, 65536 # only keep the 16th bit
+            
+            draw_letter_pixel_active:
+                sw $t9, 0($t4)
+                j draw_letter_pixel_end
+                
+            draw_letter_pixel_passive:
+                sw $t8, 0($t4)
+                
+            draw_letter_pixel_end:
+            srl $t3, $t3, 1
+            addi $t0, $t0, 1
+            addi $t4, $t4, 4
+            blt $t0, 16, draw_letter_pixel
+            
+        add $t4, $t4, $t5
+        add $t2, $t2, 4
+        addi $t1, $t1, 1
+        blt $t1, 16, draw_letter_row
+    jr $ra
+    
 # runs the game loop
 game_loop:
     # game_loop_setup:
     __caller_prep()
     jal draw_grid
+    __caller_restore()
+    
+    li $t0, 1
+    li $t1, 25
+    li $t2, 65
+    
+    __caller_prep()
+    push($t2) # A
+    push($t1)
+    push($t0)
+    jal draw_letter
     __caller_restore()
     
     li $a0, 0
@@ -853,19 +936,6 @@ game_loop:
     __caller_prep() # initialize static
     jal initialize_intermediate_playing_area
     __caller_restore()
-    
-    # # Initialize the first tetramino
-    # li $t0, 4 # x
-    # li $t1, 0 # y
-    # li $t5, 0 # rotation
-    # li $t9, 0 # loop counter
-    
-    # # Generate random tet code
-    # li $v0, 41
-    # li $a0, 0
-    # syscall   
-    # divu $a0, $a0, 7 # modulo by 7
-    # mfhi $t2
     
     game_loop_tetramino_landed:
         # # copy current to static
@@ -904,6 +974,7 @@ game_loop:
         mfhi $t2
         
         # For debugging, set tetramino to 1
+        # TODO: change this
         li $t2, 1
         
     game_loop_loop:
@@ -1020,7 +1091,6 @@ game_loop:
         jr $ra
 
 .entry main
-# TODO: 1. row detection and removal
 # TODO: 1.5 write_text
 # TODO: 2. modal (game over, start the game)
 # TODO: 3. score, modal texts
