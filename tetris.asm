@@ -174,7 +174,27 @@
     STRINGS: # only uppercase and digits are allowed
         SCORE:
             .asciiz "SCORE"
-
+        TETRIS:
+            .asciiz "TETRIS"
+        PRESS_TO_START_0:
+            .asciiz "PRESS S"
+        PRESS_TO_START_1:
+            .asciiz "TO START"
+        GAME_OVER:
+            .asciiz "GAME OVER"
+        PRESS_TO_RESTART_0:
+            .asciiz "PRESS S"
+        PRESS_TO_RESTART_1:
+            .asciiz "TO PLAY AGAIN"
+        TOP_SCORES:
+            .asciiz "TOP SCORES"
+    .align 2
+    HIGH_SCORES:
+        .word 0
+        .word 0
+        .word 0
+        .word 0
+        .word 0
 .text
 # 0: w x, 1: w y, 2: w color
 # values in unit
@@ -976,6 +996,70 @@ write_number:
         bne $t3, 0, write_number_loop
     jr $ra
 
+
+# 0: animate if zero
+make_modal_bg:
+    pop($t4)
+    lw $t0, UNIT
+    lw $t8, DISPLAY_H
+    div $t8, $t0
+    mflo $t8
+    lw $t9, DISPLAY_W
+    div $t9, $t0
+    mflo $t9
+    
+    lw $t7, GRID_COLOR
+    li $t6, 0
+    li $t5, 0
+    
+    make_modal_background_loop:
+        __caller_prep()
+        push($t7)
+        push($t6)
+        push($t9)
+        push($t6)
+        push($t5)
+        jal draw_line
+        __caller_restore()
+        
+        # TODO: uncomment this line
+        # wait - animation
+        bne $t4, 0, make_modal_background_skip_animation
+        li $v0, 32
+        li $a0, 180
+        syscall
+        
+        make_modal_background_skip_animation:
+        addi $t6, $t6, 1
+        bne $t6, $t8, make_modal_background_loop
+    jr $ra
+    
+    
+# 0: new score to insert
+insert_high_score:
+    pop($t0)
+    la $t1, HIGH_SCORES
+    move $t3, $t1
+    addi $t3, $t3, 20 # limit
+    
+    # go through each one, insert $t0 if its higher than the one, swap the rest
+    insert_high_score_loop_0:
+        lw $t2, 0($t1)
+        add $t1, $t1, 4
+        bgt $t1, $t3, insert_high_score_exit
+        blt $t0, $t2, insert_high_score_loop_0
+        sw $t0, -4($t1)
+    
+    insert_high_score_loop_1:
+        lw $t4, 0($t1)
+        sw $t2, 0($t1)
+        add $t1, $t1, 4
+        move $t2, $t4
+        ble $t1, $t3, insert_high_score_loop_1
+                
+    insert_high_score_exit:
+    jr $ra
+
 # runs the game loop
 game_loop:
     # game_loop_setup:
@@ -1028,11 +1112,13 @@ game_loop:
         jal detect_full_rows
         __caller_restore()
         
+        multu $v1, $v1, 16
         add $s0, $s0, $v1
+        
         
         li $t0, 1
         li $t1, 26
-        multu $t2, $s0, 16
+        move $t2, $s0
         
         __caller_prep()
         push($t2)
@@ -1061,8 +1147,8 @@ game_loop:
         mfhi $t2
         
         # For debugging, set tetramino to 1
-        # TODO: change this
-        li $t2, 1
+        # TODO: comment this line for random tetraminos
+        # li $t2, 1
         
     game_loop_loop:
         __caller_prep()
@@ -1174,18 +1260,175 @@ game_loop:
         b game_loop_loop
         
     game_loop_exit:
+        __caller_prep()
+        push($s0)
+        jal insert_high_score
+        __caller_restore()
+        
         __callee_restore()
         jr $ra
 
+start_game_modal:
+    li $t0, 0
+    __caller_prep()
+    push($t0)
+    jal make_modal_bg
+    __caller_restore()
+
+    li $t0, 5
+    li $t1, 8
+    la $t2, TETRIS
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    li $t0, 5
+    li $t1, 20
+    la $t2, PRESS_TO_START_0
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    li $t0, 4
+    li $t1, 21
+    la $t2, PRESS_TO_START_1
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    no_s:
+        lw $t3, KEYBOARD_ADDR
+        lw $t4, 0($t3)
+        bne $t4, 1, no_s
+        lw $t4, 4($t3)
+        beq $t4, 0x71, exit
+        bne $t4, 0x73, no_s # s
+    
+    jr $ra
+
+restart_game_modal:
+    li $t0, 0
+    __caller_prep()
+    push($t0)
+    jal make_modal_bg
+    __caller_restore()
+    
+    li $t0, 4
+    li $t1, 6
+    la $t2, GAME_OVER
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    li $t0, 5
+    li $t1, 24
+    la $t2, PRESS_TO_RESTART_0
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    li $t0, 2
+    li $t1, 25
+    la $t2, PRESS_TO_RESTART_1
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    li $t0, 4
+    li $t1, 9
+    la $t2, TOP_SCORES
+    __caller_prep()
+    push($t2)
+    push($t1)
+    push($t0)
+    jal write_word
+    __caller_restore()
+    
+    li $t3, 0
+    la $t5, HIGH_SCORES
+    restart_game_modal_high_scores:
+        li $t0, 5
+        multu $t1, $t3, 2
+        addi $t1, $t1, 12
+        
+        # write score label 1, 2, 3...
+        addi $t2, $t3, 49
+        __caller_prep()
+        push($t2)
+        push($t1)
+        push($t0)
+        jal draw_letter
+        __caller_restore()
+        
+        
+        # write score next to it
+        addi $t0, $t0, 2
+        lw $t2, 0($t5)
+        __caller_prep()
+        push($t2)
+        push($t1)
+        push($t0)
+        jal write_number
+        __caller_restore()
+    
+        addi $t3, $t3, 1
+        addi $t5, $t5, 4
+        bne $t3, 5, restart_game_modal_high_scores
+        
+    no_s:
+        lw $t3, KEYBOARD_ADDR
+        lw $t4, 0($t3)
+        bne $t4, 1, no_s
+        lw $t4, 4($t3)
+        beq $t4, 0x71, exit
+        bne $t4, 0x73, no_s # s
+    
+    jr $ra
+    
+
 .entry main
-# TODO: 1.5 write_text
-# TODO: 2. modal (game over, start the game)
-# TODO: 3. score, modal texts
+# TODO: 1. high scores
+# TODO: 2. put a random tetramino on the welcome screen and animate
 
 main:
     __caller_prep()
+    jal start_game_modal
+    __caller_restore()
+restart:
+    __caller_prep()
     jal game_loop
     __caller_restore()
+    
+    
+    __caller_prep()
+    jal restart_game_modal
+    __caller_restore()
+    
+    li $t0, 1
+    __caller_prep()
+    push($t0)
+    jal make_modal_bg
+    __caller_restore()
+    
+    b restart
     
 exit:
     li $v0, 10
