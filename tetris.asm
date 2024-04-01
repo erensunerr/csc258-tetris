@@ -1009,6 +1009,9 @@ game_loop:
     li $s0, 0
     
     game_loop_tetramino_landed:
+        # check if game is over
+        blt $t1, 4, game_loop_exit
+    
         # # copy current to static
         li $t3, 0
         li $t4, 2
