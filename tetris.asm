@@ -1,4 +1,3 @@
-# INCLUDES
 .include "font.asm"
 
 # MACROS
@@ -90,18 +89,18 @@
 
 
 .data
+    
     KEYBOARD_ADDR:
         .word 0xffff0000
     DISPLAY_ADDR:
-        .word 0x10008000
+        .word 0x10015000
     # These are in pixels
     DISPLAY_H:
-        .byte 128
+        .word 512
     DISPLAY_W:
-        .byte 64
+        .word 256
     UNIT: # sidelength of one block - not the unit in bitmap display
-        .byte 4
-    .align 1
+        .word 16
     # data + 8
     
     # x and y values are in unit dimensions, not pixels
@@ -147,7 +146,7 @@
         TET_6:
             .word 0b1110010000000000
             .word 8
-        
+    
     INTERMEDIATE_PLAYING_AREA: # (22 + 4) * 12 = 312
         # # size: GAME_AREA_W * GAME_AREA_H
         # address: 1 byte color lookup code
@@ -171,12 +170,16 @@
         .word 0xff00ff
         .word 0xffff00
         .word 0xffffff # tet - 6
+    
+    STRINGS: # only uppercase and digits are allowed
+        SCORE:
+            .asciiz "SCORE"
 
 .text
 # 0: w x, 1: w y, 2: w color
 # values in unit
 draw_box:
-    lb $t2, UNIT
+    lw $t2, UNIT
     
     pop($t0)
     multu $t0, $t0, $t2 # $t0: x in pixels
@@ -185,36 +188,35 @@ draw_box:
     multu $t1, $t1, $t2 # $t1: y in pixels
     
     pop($t7) # $t7 is color
-    
-    lb $t3, DISPLAY_W
+    lw $t3, DISPLAY_W
     multu $t1, $t1, $t3 # $t1: change in position due to y coord
     
     add $t0, $t0, $t1 # t0 is the correct pixel location
     # $t0 = UNIT*x + DISPLAY_W*UNIT*y
     
-    lb $t8, UNIT
-        draw_box_loop_0:
-            lb $t9, UNIT
-            draw_box_loop_1:
-                # draw the pixel at $t0
-                lw $t4, DISPLAY_ADDR
-                move $t5, $t0
-                # This is 4 because the color is 4 bytes, not unit!
-                mult $t5, $t5, 4
-                add $t4, $t4, $t5
-                # Write address is $t4 = DISPLAY_ADDR + 4*$t0
-                sw $t7, 0($t4)
-                
-                addi $t0, $t0, 1
-                subi $t9, $t9, 1
-                bne $t9, 0, draw_box_loop_1
-            subi $t8, $t8, 1
+    lw $t8, UNIT
+    draw_box_loop_0:
+        lw $t9, UNIT
+        draw_box_loop_1:
+            # draw the pixel at $t0
+            lw $t4, DISPLAY_ADDR
+            move $t5, $t0
+            # This is 4 because the color is 4 bytes, not unit!
+            multu $t5, $t5, 4
+            add $t4, $t4, $t5
+            # Write address is $t4 = DISPLAY_ADDR + 4*$t0
+            sw $t7, 0($t4)
             
-            # $t0 = DISPLAY_W - UNIT, so it's the correct value
-            add $t0, $t0, $t3
-            sub $t0, $t0, $t2
-            
-            bne $t8, 0, draw_box_loop_0
+            addi $t0, $t0, 1
+            subi $t9, $t9, 1
+            bne $t9, 0, draw_box_loop_1
+        subi $t8, $t8, 1
+        
+        # $t0 = DISPLAY_W - UNIT, so it's the correct value
+        add $t0, $t0, $t3
+        sub $t0, $t0, $t2
+        
+        bne $t8, 0, draw_box_loop_0
             
     jr $ra
 
@@ -310,8 +312,8 @@ draw_grid:
     
     # divide display width by unit to get it in units
     # and not pixels
-    lb $t6, DISPLAY_W
-    lb $t8, UNIT
+    lw $t6, DISPLAY_W
+    lw $t8, UNIT
     divu $t6, $t8
     mflo $t6
     
@@ -333,8 +335,8 @@ draw_grid:
     lb $t4, GAME_AREA_TOP_LEFT_x
     add $t4, $t4, $t1
     
-    lb $t2, DISPLAY_W
-    lb $t3, UNIT
+    lw $t2, DISPLAY_W
+    lw $t3, UNIT
     divu $t2, $t3
     mflo $t2
     
@@ -705,11 +707,13 @@ rotate_left:
 
 
 # $a0: which IPA to do this on
-# returns a bitmap (1 for full, 0 for not) from bottom to 4th row (first displayed)
+# returns a bitmap (1 for full, 0 for not) from bottom to 4th row (first displayed) in $v0
+# $v1: number of rows removed
 detect_full_rows:
   lb $t1, GAME_AREA_HEIGHT # start from the bottom row
   addi $t1, $t1, 3
   li $t2, 0
+  lb $v1, GAME_AREA_HEIGHT
   detect_full_rows_loop_y:
     lb $t0, GAME_AREA_WIDTH
     subi $t0, $t0, 1
@@ -728,6 +732,7 @@ detect_full_rows:
         j detect_full_rows_y_end
     detect_full_rows_empty:
     li $t3, 0
+    subi $v1, $v1, 1
     detect_full_rows_y_end:
     or $t2, $t2, $t3
     sll $t2, $t2, 1
@@ -836,6 +841,7 @@ remove_rows:
     jr $ra
 
 # 0: w x, 1: w y, 2: ascii code
+# x and y in unit length
 draw_letter:
     pop($t0)
     pop($t1)
@@ -853,13 +859,13 @@ draw_letter:
     # $t2 has the address of the 16*16 glyph
     draw_letter_letter:
         subi $t2, $t2, 65
-        multu $t2, $t2, 256
+        multu $t2, $t2, 64
         la $t4, CHARACTERS
         add $t2, $t2, $t4
         j draw_letter_end_switch
     draw_letter_digit:
         subi $t2, $t2, 48
-        multu $t2, $t2, 256
+        multu $t2, $t2, 64
         la $t4, DIGITS
         add $t2, $t2, $t4
         j draw_letter_end_switch
@@ -867,17 +873,19 @@ draw_letter:
         la $t2, UNKNOWN
         
     draw_letter_end_switch:
-    la $t4, DISPLAY_ADDR
-    lb $t5, DISPLAY_W
+    lw $t4, DISPLAY_ADDR
+    lw $t5, DISPLAY_W
     multu $t5, $t5, $t1
     add $t5, $t5, $t0
-    multu $t5, $t5, 16 # 16 byte boxes for x and y
+    
+    lw $t8, UNIT
+    multu $t5, $t5, $t8 # unit sized boxes
     multu $t5, $t5, 4 # 4 byte colors
     add $t4, $t4, $t5
     # t4 has the address we should start writing from
     
-    lb $t5, DISPLAY_W # delta to add for each row
-    subi $t5, $t5, 16
+    lw $t5, DISPLAY_W # delta to add for each row
+    sub $t5, $t5, $t8
     multu $t5, $t5, 4
     
     li $t9, 0xffffff # white
@@ -886,9 +894,10 @@ draw_letter:
     li $t1, 0
     draw_letter_row:
         li $t0, 0
-        lw $3, 0($t2)
+        lw $t3, 0($t2)
         draw_letter_pixel:
             andi $t6, $t3, 65536 # only keep the 16th bit
+            beq $t6, 0, draw_letter_pixel_passive
             
             draw_letter_pixel_active:
                 sw $t9, 0($t4)
@@ -898,7 +907,7 @@ draw_letter:
                 sw $t8, 0($t4)
                 
             draw_letter_pixel_end:
-            srl $t3, $t3, 1
+            sll $t3, $t3, 1
             addi $t0, $t0, 1
             addi $t4, $t4, 4
             blt $t0, 16, draw_letter_pixel
@@ -908,7 +917,65 @@ draw_letter:
         addi $t1, $t1, 1
         blt $t1, 16, draw_letter_row
     jr $ra
-    
+
+# 0: x
+# 1: y
+# 2: zero terminated ascii string address
+# you are responsible for choosing a good location
+# it will wrap around and cause trouble !!
+write_word:
+    pop($t0)
+    pop($t1)
+    pop($t2)
+    nop
+    write_word_loop:
+        lb $t3, 0($t2)
+        beq $t3, 0, write_word_done
+        __caller_prep()
+        push($t3)
+        push($t1)
+        push($t0)
+        jal draw_letter
+        __caller_restore()
+        addi $t2, $t2, 1
+        addi $t0, $t0, 1
+        j write_word_loop
+        
+    write_word_done:
+        jr $ra
+
+# 0: x
+# 1: y
+# 2: number
+write_number:
+    pop($t0)
+    pop($t1)
+    pop($t2)
+    li $t3, 1000
+    li $t9, 10
+    write_number_loop:
+        divu $t2, $t3
+        # t2 gets the remainder
+        # t4 gets the other one
+        # print t4
+        mfhi $t2
+        mflo $t4
+        addi $t4, $t4, 48
+        
+        __caller_prep()
+        push($t4)
+        push($t1)
+        push($t0)
+        jal draw_letter
+        __caller_restore()
+        
+        divu $t3, $t9
+        # t3 gets the other one
+        mflo $t3
+        addi $t0, $t0, 1
+        bne $t3, 0, write_number_loop
+    jr $ra
+
 # runs the game loop
 game_loop:
     # game_loop_setup:
@@ -918,14 +985,15 @@ game_loop:
     
     li $t0, 1
     li $t1, 25
-    li $t2, 65
+    la $t2, SCORE
     
     __caller_prep()
-    push($t2) # A
+    push($t2)
     push($t1)
     push($t0)
-    jal draw_letter
+    jal write_word
     __caller_restore()
+    
     
     li $a0, 0
     __caller_prep() # initialize current IPA
@@ -936,6 +1004,9 @@ game_loop:
     __caller_prep() # initialize static
     jal initialize_intermediate_playing_area
     __caller_restore()
+    
+    # score starts from 0
+    li $s0, 0
     
     game_loop_tetramino_landed:
         # # copy current to static
@@ -954,12 +1025,25 @@ game_loop:
         jal detect_full_rows
         __caller_restore()
         
+        add $s0, $s0, $v1
+        
+        li $t0, 1
+        li $t1, 26
+        multu $t2, $s0, 16
+        
+        __caller_prep()
+        push($t2)
+        push($t1)
+        push($t0)
+        jal write_number
+        __caller_restore()
+        
         __caller_prep()
         push($v0)
         jal remove_rows
         __caller_restore()
         
-        nop
+        
         # change tet number and reset the x and y
         li $t0, 4 # x
         li $t1, 0 # y
